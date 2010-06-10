@@ -10,15 +10,57 @@
 #endif
 
 /*
- * A function that ensures compiler and hardware read/write order, also known as a memory barrier.
+ * A function that ensures that both read and write operations are complete.
  */
-void memory_barrier()
+void memory_fence()
 {
-#ifdef _MSC_VER
-	_ReadWriteBarrier();
-#else
-	__sync_synchronize();
-#endif
+	#ifdef _M_IX86
+		#ifdef _MSC_VER
+			_ReadWriteBarrier();
+			__asm {
+				mfence;
+			}
+		#else
+			__sync_synchronize();
+			__asm("mfence");
+		#endif
+	#endif
+}
+
+/*
+ * A function that ensures that all read operations are complete.
+ */
+void read_fence()
+{
+	#ifdef _M_IX86
+		#ifdef _MSC_VER
+			_ReadBarrier();
+			__asm {
+				lfence;
+			}
+		#else
+			__sync_synchronize();
+			__asm("lfence");
+		#endif
+	#endif
+}
+
+/*
+ * A function that ensures that all write operations are complete.
+ */
+void write_fence()
+{
+	#ifdef _M_IX86
+		#ifdef _MSC_VER
+			_WriteBarrier();
+			__asm {
+				sfence;
+			}
+		#else
+			__sync_synchronize();
+			__asm("sfence");
+		#endif
+	#endif
 }
 
 /*
@@ -26,13 +68,13 @@ void memory_barrier()
  *  TODO: Implement a silding window?
  */
 
-#define PORTAL_BUFFER_COUNT 1
+#define PORTAL_BUFFER_COUNT 512
 #define PORTAL_BUFFER_MASK (PORTAL_BUFFER_COUNT - 1)
 
 /*
  * Part is a structure belonging to one of the threads.
  */
-struct part {
+volatile struct part {
 	/*
 	 * The number of reads this part has done.
 	 */
@@ -111,7 +153,7 @@ void part_free(struct part *part)
  * part_write()
  *  Write a message to a part.
  */
-bool part_write(volatile struct part *part, message_t *msg, int *test)
+bool part_write(struct part *part, message_t *msg, int *test)
 {
 	size_t read_count = part->read_count;
 	size_t write_count = part->write_count;
@@ -119,35 +161,36 @@ bool part_write(volatile struct part *part, message_t *msg, int *test)
 
 	if(used_count >= PORTAL_BUFFER_COUNT)
 	{
+		event_t event;
+
+		read_fence();
+
 		/*
 		 * Check if there is a pending waiting event, if so, trigger it.
 		 */
-		event_t event = part->event;
+		event = part->event;
 
 		if(event)
+		{
 			event_set(event);
+		}
 
-		*test = *test + 1;
-
+		(*test)++;
+		
 		while(write_count - read_count >= PORTAL_BUFFER_COUNT)
 		{
 			SwitchToThread();
 
 			read_count = part->read_count;
 		}
-		//assert(0);
-
-		//return false;
 	}
-
+	
 	part->buffer[write_count & PORTAL_BUFFER_MASK] = *msg;
 
-	memory_barrier();
+	write_fence();
 
 	part->write_count++;
-
-	memory_barrier();
-
+	
 	return true;
 }
 
@@ -157,7 +200,7 @@ bool part_write(volatile struct part *part, message_t *msg, int *test)
  */
 void part_read(struct part *part, size_t count)
 {
-	memory_barrier();
+	read_fence();
 
 	part->read_count += count;
 }
@@ -215,8 +258,8 @@ void portal_write(struct portal *portal, message_t *msg, int *test)
 void portal_write_and_notify(struct portal *portal, message_t *msg)
 {
 	event_t event;
-	int a;
-	part_write(portal->remote, msg, &a);
+	int dummy;
+	part_write(portal->remote, msg, &dummy);
 
 	/*
 	 * Check if there is a pending waiting event, if so, trigger it.
@@ -224,7 +267,10 @@ void portal_write_and_notify(struct portal *portal, message_t *msg)
 	event = portal->remote->event;
 
 	if(event)
+	{
+		write_fence();
 		event_set(event);
+	}
 }
 
 void portal_notify(struct portal *portal)
@@ -235,7 +281,10 @@ void portal_notify(struct portal *portal)
 	event_t event = portal->remote->event;
 
 	if(event && part_pending_msgs(portal->remote))
+	{
+		write_fence();
 		event_set(event);
+	}
 }
 
 void portal_wait(struct portal *portal)
@@ -251,11 +300,15 @@ void portal_wait(struct portal *portal)
 	event_clear(portal->event);
 	portal->local->event = portal->event;
 
+	memory_fence();
+
 	/*
 	 * Make sure there are no new messages, then wait.
 	 */
 	if(!part_pending_msgs(portal->local))
+	{
 		event_wait(portal->event);
+	}
 
 	/*
 	 * Clear the waiting event.
@@ -291,7 +344,7 @@ void portal_sync_query(struct portal *portal, message_t *msg, size_t msg_id)
 	 */
 	portal->local->msg_id = 0;
 
-	memory_barrier();
+	write_fence();
 
 	event_clear(portal->event);
 	portal->local->msg_event = portal->event;
@@ -316,7 +369,7 @@ void portal_sync_reply(struct portal *portal, message_t *msg, size_t msg_id)
 	event_t msg_event = portal->remote->msg_event;
 	size_t remote_msg_id;
 
-	memory_barrier();
+	read_fence();
 
 	remote_msg_id = portal->remote->msg_id;
 
@@ -324,8 +377,10 @@ void portal_sync_reply(struct portal *portal, message_t *msg, size_t msg_id)
 	{
 		/*
 		 * Send the message and trigger the event.
-		 */int a;
-		part_write(portal->remote, msg, &a);
+		 */
+		int dummy;
+		part_write(portal->remote, msg, &dummy);
+		write_fence();
 		event_set(msg_event);
 	}
 	else
