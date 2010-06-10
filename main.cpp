@@ -72,8 +72,7 @@ int main()
 
     #ifdef WIN32
     DWORD thread_id;
-
-    HANDLE thread = CreateThread(0, 0, other_thread, 0, 0, &thread_id);   // returns the thread identifier
+    HANDLE thread = CreateThread(0, 0, (LPTHREAD_START_ROUTINE)other_thread, 0, 0, &thread_id);   // returns the thread identifier
     #else
     pthread_t thread;
     pthread_create(&thread, 0, (void *(*)(void *))other_thread, 0);
