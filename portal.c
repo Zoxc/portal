@@ -1,29 +1,49 @@
 #include <string.h>
 #include <malloc.h>
 #include <assert.h>
+
+#ifdef WIN32
+    #include <windows.h>
+
+    #ifdef _MSC_VER
+        #include <intrin.h>
+    #endif
+#else
+    #include <sched.h>
+    #define min(a, b) (a > b ? b : a)
+#endif
+
 #include "event.h"
 #include "portal.h"
-#include "windows.h"
 
-#ifdef _MSC_VER
-	#include <intrin.h>
-#endif
+
 
 /*
  * A function that ensures that both read and write operations are complete.
  */
 void memory_fence()
 {
-	#ifdef _M_IX86
+	#if defined(_M_IX86) || defined(_X86_)
 		#ifdef _MSC_VER
 			_ReadWriteBarrier();
 			__asm {
 				mfence;
 			}
 		#else
-			__sync_synchronize();
 			__asm("mfence");
 		#endif
+	#endif
+
+	#ifdef ARMv7
+        __asm("dmb");
+	#endif
+
+	#ifdef _MSC_VER
+			_ReadWriteBarrier();
+    #endif
+
+	#ifdef __GNUC__
+        __sync_synchronize();
 	#endif
 }
 
@@ -32,16 +52,27 @@ void memory_fence()
  */
 void read_fence()
 {
-	#ifdef _M_IX86
+	#if defined(_M_IX86) || defined(_X86_)
 		#ifdef _MSC_VER
-			_ReadBarrier();
-			__asm {
+			__asm
+			{
 				lfence;
 			}
 		#else
-			__sync_synchronize();
 			__asm("lfence");
 		#endif
+	#endif
+
+	#ifdef ARMv7
+        __asm("dmb");
+	#endif
+
+	#ifdef _MSC_VER
+        _ReadBarrier();
+    #endif
+
+	#ifdef __GNUC__
+        __sync_synchronize();
 	#endif
 }
 
@@ -50,16 +81,27 @@ void read_fence()
  */
 void write_fence()
 {
-	#ifdef _M_IX86
+	#if defined(_M_IX86) || defined(_X86_)
 		#ifdef _MSC_VER
-			_WriteBarrier();
-			__asm {
+			__asm
+			{
 				sfence;
 			}
 		#else
-			__sync_synchronize();
 			__asm("sfence");
 		#endif
+	#endif
+
+	#ifdef ARMv7
+        __asm("dmb");
+	#endif
+
+	#ifdef _MSC_VER
+        _WriteBarrier();
+    #endif
+
+	#ifdef __GNUC__
+        __sync_synchronize();
 	#endif
 }
 
@@ -74,31 +116,31 @@ void write_fence()
 /*
  * Part is a structure belonging to one of the threads.
  */
-volatile struct part {
+struct part {
 	/*
 	 * The number of reads this part has done.
 	 */
-	size_t read_count;
+	volatile size_t read_count;
 
 	/*
 	 * The number of writes the other part has done.
 	 */
-	size_t write_count;
+	volatile size_t write_count;
 
 	/*
 	 * An event which if preset will be used to signal new messages.
 	 */
-	event_t event;
+	volatile event_t event;
 
 	/*
 	 * An event which if preset will be used to signal a reply to a synchronious message.
 	 */
-	event_t msg_event;
+	volatile event_t msg_event;
 
 	/*
 	 * The id of the send synchronious message.
 	 */
-	size_t msg_id;
+	volatile size_t msg_id;
 
 	/*
 	 * A buffer containg messages to be read.
@@ -176,21 +218,25 @@ bool part_write(struct part *part, message_t *msg, int *test)
 		}
 
 		(*test)++;
-		
+
 		while(write_count - read_count >= PORTAL_BUFFER_COUNT)
 		{
-			SwitchToThread();
+		    #ifdef WIN32
+                SwitchToThread();
+            #else
+                sched_yield();
+            #endif
 
 			read_count = part->read_count;
 		}
 	}
-	
+
 	part->buffer[write_count & PORTAL_BUFFER_MASK] = *msg;
 
 	write_fence();
 
 	part->write_count++;
-	
+
 	return true;
 }
 
