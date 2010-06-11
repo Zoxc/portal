@@ -93,7 +93,7 @@ void write_fence()
 	#endif
 
 	#ifdef ARMv7
-        __asm("dmb");
+        __asm("dmb st");
 	#endif
 
 	#ifdef _MSC_VER
@@ -172,11 +172,11 @@ struct portal {
  */
 struct part *part_alloc()
 {
-    struct part *part = malloc(sizeof(struct part));
+    struct part *part = (struct part *)malloc(sizeof(struct part));
 
     memset(part, 0, sizeof(struct part));
 
-    part->buffer = malloc(sizeof(message_t) * PORTAL_BUFFER_COUNT);
+    part->buffer = (message_t *)malloc(sizeof(message_t) * PORTAL_BUFFER_COUNT);
 
 	return part;
 }
@@ -269,12 +269,12 @@ void portal_alloc(struct portal *portals[])
     struct part *remote = part_alloc();
     struct part *local = part_alloc();
 
-    portals[0] = malloc(sizeof(struct portal));
+    portals[0] = (struct portal *)malloc(sizeof(struct portal));
     portals[0]->remote = remote;
     portals[0]->local = local;
     portals[0]->event = event_alloc();
 
-    portals[1] = malloc(sizeof(struct portal));
+    portals[1] = (struct portal *)malloc(sizeof(struct portal));
     portals[1]->remote = local;
     portals[1]->local = remote;
     portals[1]->event = event_alloc();

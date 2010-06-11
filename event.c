@@ -17,7 +17,7 @@ struct event
 
 event_t event_alloc()
 {
-    event_t event = malloc(sizeof(struct event));
+    event_t event = (event_t)malloc(sizeof(struct event));
 
     #ifdef WIN32
         event->handle = CreateEvent(0, TRUE, 0, 0);
