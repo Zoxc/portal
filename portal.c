@@ -51,7 +51,7 @@ void memory_fence()
 	#endif
 
 	#ifdef __GNUC__
-        __sync_synchronize();
+		__sync_synchronize();
 	#endif
 }
 
@@ -78,11 +78,11 @@ void read_fence()
 	#endif
 
 	#ifdef _MSC_VER
-        _ReadBarrier();
+		_ReadBarrier();
 	#endif
 
 	#ifdef __GNUC__
-        __sync_synchronize();
+		__sync_synchronize();
 	#endif
 }
 
@@ -109,11 +109,11 @@ void write_fence()
 	#endif
 
 	#ifdef _MSC_VER
-        _WriteBarrier();
+		_WriteBarrier();
 	#endif
 
 	#ifdef __GNUC__
-        __sync_synchronize();
+		__sync_synchronize();
 	#endif
 }
 
@@ -197,12 +197,14 @@ struct part *part_alloc()
 {
 	struct part *part = (struct part *)malloc(sizeof(struct part));
 
-    memset(part, 0, sizeof(struct part));
-
-	#if defined(__SSE2__) || defined(__ARM_NEON__)
+	memset(part, 0, sizeof(struct part));
+	
+	#ifdef __SSE2__
 		part->buffer = (message_t *)_mm_malloc(sizeof(message_t) * PORTAL_BUFFER_COUNT, 16);
-	#else
+	#elif WIN32
 		part->buffer = (message_t *)malloc(sizeof(message_t) * PORTAL_BUFFER_COUNT);
+	#else
+		part->buffer = (message_t *)memalign(16, sizeof(message_t) * PORTAL_BUFFER_COUNT);
 	#endif
 
 	return part;
@@ -283,7 +285,7 @@ void portal_write(struct portal *portal, message_t *msg, int *test)
 	#elif __ARM_NEON__
 		uint32x4_t reg;
 
-		reg = vld1q_u32((uint32_t *)msg, reg);
+		reg = vld1q_u32((uint32_t *)msg);
 
 		vst1q_u32((uint32_t *)&part->buffer[write_count & PORTAL_BUFFER_MASK]);
 	#else	
