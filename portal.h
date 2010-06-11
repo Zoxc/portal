@@ -35,6 +35,7 @@ void portal_free(struct portal *portals[]);
 void portal_write(struct portal *portal, message_t *msg, int *test);
 void portal_write_and_notify(struct portal *portal, message_t *msg);
 void portal_notify(struct portal *portal);
+void portal_read_msg(message_t *queue, message_t *target);
 void portal_wait(struct portal *portal);
 size_t portal_pending(struct portal *portal, message_t **msgs);
 void portal_read(struct portal *portal, size_t count);

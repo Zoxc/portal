@@ -21,8 +21,8 @@
 				<Option type="1" />
 				<Option compiler="gcc" />
 				<Compiler>
-					<Add option="-march=nocona" />
 					<Add option="-O3" />
+					<Add option="-march=core2 -mtune=core2 -msse2" />
 				</Compiler>
 				<Linker>
 					<Add option="-s" />

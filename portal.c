@@ -13,6 +13,14 @@
     #define min(a, b) (a > b ? b : a)
 #endif
 
+#ifdef __SSE2__
+	#include <emmintrin.h>
+#endif
+
+#ifdef __ARM_NEON__
+	#include <arm_neon.h>
+#endif
+
 #include "event.h"
 #include "portal.h"
 
@@ -184,11 +192,15 @@ struct portal {
  */
 struct part *part_alloc()
 {
-    struct part *part = (struct part *)malloc(sizeof(struct part));
+	struct part *part = (struct part *)malloc(sizeof(struct part));
 
     memset(part, 0, sizeof(struct part));
 
-    part->buffer = (message_t *)malloc(sizeof(message_t) * PORTAL_BUFFER_COUNT);
+	#if defined(__SSE2__) || defined(__ARM_NEON__)
+		part->buffer = (message_t *)_mm_malloc(sizeof(message_t) * PORTAL_BUFFER_COUNT, 16);
+	#else
+		part->buffer = (message_t *)malloc(sizeof(message_t) * PORTAL_BUFFER_COUNT);
+	#endif
 
 	return part;
 }
@@ -253,10 +265,43 @@ void portal_write(struct portal *portal, message_t *msg, int *test)
 			read_count = part->read_count;
 		}
 	}
+	
+	#ifdef  __SSE2__
+		__m128i reg;
+		
+		reg = _mm_loadu_si128((__m128i *)msg);
+		
+		_mm_store_si128((__m128i *)&part->buffer[pending_write_count & PORTAL_BUFFER_MASK], reg);
+	#elif __ARM_NEON__
+		uint32x4_t reg;
 
-	part->buffer[pending_write_count & PORTAL_BUFFER_MASK] = *msg;
+		reg = vld1q_u32((uint32_t *)msg, reg);
 
+		vst1q_u32((uint32_t *)&part->buffer[pending_write_count & PORTAL_BUFFER_MASK]);
+	#else	
+		part->buffer[pending_write_count & PORTAL_BUFFER_MASK] = *msg;
+	#endif
+	
 	portal->pending_write_count = pending_write_count + 1;
+}
+
+void portal_read_msg(message_t *queue, message_t *target)
+{
+	#ifdef  __SSE2__
+		__m128i reg;
+		
+		reg = _mm_load_si128((__m128i *)queue);
+		
+		_mm_storeu_si128((__m128i *)target, reg);
+	#elif __ARM_NEON__
+		uint32x4_t reg;
+
+		reg = vld1q_u32((uint32_t *)queue);
+
+		vst1q_u32((uint32_t *)target, reg);
+	#else	
+		*target = *queue;
+	#endif
 }
 
 /*

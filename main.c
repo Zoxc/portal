@@ -91,7 +91,7 @@ int main()
 		{
 			for(int x = 0; x < pending; x++)
 			{
-				msg = msgs[x];
+				portal_read_msg(&msgs[x], &msg);
 			}
 
 			portal_read(portal, pending);
