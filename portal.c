@@ -48,7 +48,7 @@ void memory_fence()
 
 	#ifdef _MSC_VER
 			_ReadWriteBarrier();
-    #endif
+	#endif
 
 	#ifdef __GNUC__
         __sync_synchronize();
@@ -79,7 +79,7 @@ void read_fence()
 
 	#ifdef _MSC_VER
         _ReadBarrier();
-    #endif
+	#endif
 
 	#ifdef __GNUC__
         __sync_synchronize();
@@ -110,7 +110,7 @@ void write_fence()
 
 	#ifdef _MSC_VER
         _WriteBarrier();
-    #endif
+	#endif
 
 	#ifdef __GNUC__
         __sync_synchronize();
@@ -175,10 +175,13 @@ struct portal {
 	 */
 	struct part *local;
 	
-	/*
-	 * A pending updated write count which the other part don't know about yet.
-	 */
-	size_t pending_write_count;
+	#ifndef PORTAL_UNIPROCESSOR
+		/*
+		 * A pending updated write count which the other part don't know about yet.
+		 *  This is only used to prevent a memory barrier. No need for that on a uniprocessor system.
+		 */
+		size_t pending_write_count;
+	#endif
 
 	/*
 	 * Event used for synchronizing.
@@ -232,9 +235,14 @@ void portal_write(struct portal *portal, message_t *msg, int *test)
 {
 	struct part *part = portal->remote;
 
-	size_t pending_write_count = portal->pending_write_count;
+	#ifdef PORTAL_UNIPROCESSOR
+		size_t write_count = part->write_count;
+	#else
+		size_t write_count = portal->pending_write_count;
+	#endif
+	
 	size_t read_count = part->read_count;
-	size_t used_count = pending_write_count - read_count;
+	size_t used_count = write_count - read_count;
 
 	if(used_count >= PORTAL_BUFFER_COUNT)
 	{
@@ -254,7 +262,7 @@ void portal_write(struct portal *portal, message_t *msg, int *test)
 
 		(*test)++;
 
-		while(pending_write_count - read_count >= PORTAL_BUFFER_COUNT)
+		while(write_count - read_count >= PORTAL_BUFFER_COUNT)
 		{
 		    #ifdef WIN32
                 SwitchToThread();
@@ -271,18 +279,22 @@ void portal_write(struct portal *portal, message_t *msg, int *test)
 		
 		reg = _mm_loadu_si128((__m128i *)msg);
 		
-		_mm_store_si128((__m128i *)&part->buffer[pending_write_count & PORTAL_BUFFER_MASK], reg);
+		_mm_store_si128((__m128i *)&part->buffer[write_count & PORTAL_BUFFER_MASK], reg);
 	#elif __ARM_NEON__
 		uint32x4_t reg;
 
 		reg = vld1q_u32((uint32_t *)msg, reg);
 
-		vst1q_u32((uint32_t *)&part->buffer[pending_write_count & PORTAL_BUFFER_MASK]);
+		vst1q_u32((uint32_t *)&part->buffer[write_count & PORTAL_BUFFER_MASK]);
 	#else	
-		part->buffer[pending_write_count & PORTAL_BUFFER_MASK] = *msg;
+		part->buffer[write_count & PORTAL_BUFFER_MASK] = *msg;
 	#endif
 	
-	portal->pending_write_count = pending_write_count + 1;
+	#ifdef PORTAL_UNIPROCESSOR
+		part->write_count++;
+	#else
+		portal->pending_write_count = write_count + 1;
+	#endif
 }
 
 void portal_read_msg(message_t *queue, message_t *target)
@@ -317,13 +329,17 @@ void portal_alloc(struct portal *portals[])
     portals[0]->remote = remote;
     portals[0]->local = local;
     portals[0]->event = event_alloc();
-	portals[0]->pending_write_count = 0;
+	
 
     portals[1] = (struct portal *)malloc(sizeof(struct portal));
     portals[1]->remote = local;
     portals[1]->local = remote;
     portals[1]->event = event_alloc();
-	portals[1]->pending_write_count = 0;
+	
+	#ifndef PORTAL_UNIPROCESSOR
+		portals[1]->pending_write_count = 0;
+		portals[0]->pending_write_count = 0;
+	#endif
 }
 
 /*
@@ -362,14 +378,16 @@ void portal_write_and_notify(struct portal *portal, message_t *msg)
 
 void portal_flush(struct portal *portal)
 {
-	/*
-	 * Flush the write count if we have any pending writes.
-	 */
-	if(portal->pending_write_count != portal->remote->write_count)
-	{
-		write_fence();
-		portal->remote->write_count = portal->pending_write_count;
-	}
+	#ifndef PORTAL_UNIPROCESSOR
+		/*
+		 * Flush the write count if we have any pending writes.
+		 */
+		if(portal->pending_write_count != portal->remote->write_count)
+		{
+			write_fence();
+			portal->remote->write_count = portal->pending_write_count;
+		}
+	#endif
 }
 
 void portal_notify(struct portal *portal)
